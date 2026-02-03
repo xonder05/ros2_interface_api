@@ -22,6 +22,7 @@ ws.set_message_callback(message_callback);
 
 let message_event_emitter = new events.EventEmitter();
 let message_queue = [];
+let waiting_service_calls = {};
 
 // -------------------- Lifecycle Functions --------------------
 
@@ -149,6 +150,42 @@ function unsubscribe_topic(topic_name)
     }
 }
 
+function consume_service(service_name, type, qos) 
+{
+    const msg = '{"op":"consume","service":"' + String(service_name) + '","type":"' + String(type) + '"}';
+
+    if (interface_ready()) 
+    {
+        ws.send_message(msg);
+    }
+    else 
+    {
+        message_queue.push(msg);
+
+        if (message_queue.length == 1) {
+            send_once_ready();
+        }
+    }
+}
+
+function unconsume_service(service_name) 
+{
+    const msg = '{"op":"unconsume","service":"' + String(service_name) + '"}';
+
+    if (interface_ready()) 
+    {
+        ws.send_message(msg);
+    }
+    else 
+    {
+        message_queue.push(msg);
+
+        if (message_queue.length == 1) {
+            send_once_ready();
+        }
+    }
+}
+
 /**
  * Publishes data via websocket to previously registered topic
  */
@@ -177,7 +214,7 @@ function send_once_ready()
 {
     if (interface_ready())
     {
-        for (msg in message_queue)
+        for (const msg of message_queue)
         {
             ws.send_message(msg)
         }
@@ -191,6 +228,36 @@ function send_once_ready()
     }
 }
 
+function create_deferred_promise()
+{
+    let resolve, reject;
+    const promise = new Promise((res, rej) => {resolve = res; reject = rej;});
+    return {promise, resolve, reject}
+}
+
+async function call(service_name, connection_id, data)
+{
+    let msg = '{"op":"call","service":"' + String(service_name) + '","id":"' + String(connection_id) + '","payload":' + JSON.stringify(data) + '}';
+
+    if (interface_ready()) 
+    {
+        ws.send_message(msg);
+    }
+    else 
+    {
+        message_queue.push(msg);
+
+        if (message_queue.length == 1) {
+            send_once_ready();
+        }
+    }
+
+    const promise = create_deferred_promise();
+
+    waiting_service_calls[connection_id] = promise;
+    return promise.promise;
+}
+
 // -------------------- Incoming Message Handling --------------------
 
 /**
@@ -201,6 +268,19 @@ function message_callback(msg)
     if (msg.op == "publish")
     {
         message_event_emitter.emit(msg.topic, msg);
+    }
+    if (msg.op == "call")
+    {
+        const promise = waiting_service_calls[msg.id]
+
+        if (msg.payload !== "") {
+            promise.resolve(msg.payload)
+        }
+        else {
+            promise.reject()
+        }
+
+        delete waiting_service_calls[msg.connection_id]
     }
 }
 
@@ -226,7 +306,10 @@ module.exports = {
     unadvertise_topic,
     subscribe_topic,
     unsubscribe_topic,
+    consume_service,
+    unconsume_service,
     publish,
+    call,
 
     get_event_emitter,
     get_system_status,
