@@ -5,7 +5,7 @@ Author: Daniel Onderka (xonder05)
 Date: 01/2026
 """
 
-import importlib, json
+import json
 
 import rclpy
 from rclpy.node import Node
@@ -165,7 +165,7 @@ class NodeRedInterface(Node):
 
 # -------------------- (Un) Registering ROS2 communication classes --------------------
 
-    def advertise(self, topic: str, type: str, qos = 10) -> None:
+    def advertise(self, topic: str, full_type_string: str, qos = 10) -> None:
         """
         Registers publisher to specified 'topic'. Saves how many times was this function called 
         and the same amount of unadvertise() calls will be required before unregistering the publisher.
@@ -181,9 +181,8 @@ class NodeRedInterface(Node):
         if self.config.get(topic).get("pub_cnt") is None:
             try:
                 # import type
-                package_name, msg, type_name = type.split("/")
-                module = importlib.import_module(f"{package_name}.{msg}")
-                type_class = getattr(module, type_name)
+                package_name, type_name = full_type_string.split("/")
+                type_class = get_message(f"{package_name}/{type_name}")
 
                 # create publisher and config
                 self.config[topic]["pub"] = self.create_publisher(type_class, topic, qos)
@@ -191,9 +190,12 @@ class NodeRedInterface(Node):
                 self.config[topic]["pub_type"] = type_class
 
                 self.get_logger().info(f"Publisher for topic {topic} successfully registered")
-
+            
+            # all of these can be thrown by the get_message function
+            except ValueError:
+                self.get_logger().info(f"The 'full_type_string' parameter is not in correct format, expected: 'package/Type', got: '{full_type_string}'")
             except ModuleNotFoundError:
-                self.get_logger().info(f"Module {package_name}.{msg} does not exist")
+                self.get_logger().info(f"Package {package_name} does not exist")
             except AttributeError:
                 self.get_logger().info(f"Package {package_name} does not contain {type_name} type")
 
@@ -225,6 +227,7 @@ class NodeRedInterface(Node):
 
                 del self.config[topic]["pub"]
                 del self.config[topic]["pub_cnt"]
+                del self.config[topic]["pub_type"]
 
                 if len(self.config[topic]) == 0:
                     del self.config[topic]
@@ -232,7 +235,7 @@ class NodeRedInterface(Node):
                 self.get_logger().info(f"Successfully removed publisher from topic {topic}")
 
 
-    def subscribe(self, topic, type, qos = 10):
+    def subscribe(self, topic_name: str, full_type_string: str, qos = 10) -> None:
         """
         Registers subscriber to specified 'topic'. Saves how many times was this function called 
         and the same amount of unsubscribe() calls will be required before unregistering the subscriber.
@@ -241,36 +244,38 @@ class NodeRedInterface(Node):
         """
 
         # init in case this topic is new
-        if self.config.get(topic) is None:
-            self.config[topic] = {}
+        if self.config.get(topic_name) is None:
+            self.config[topic_name] = {}
         
         # not yet registered
-        if self.config.get(topic).get("sub_cnt") is None:
+        if self.config.get(topic_name).get("sub_cnt") is None:
             try:
                 # import type
-                package_name, msg, type_name = type.split("/")
-                module = importlib.import_module(f"{package_name}.{msg}")
-                type_class = getattr(module, type_name)
+                package_name, type_name = full_type_string.split("/")
+                type_class = get_message(f"{package_name}/{type_name}")
 
                 # create subscriber and config
-                self.config[topic]["sub"] = self.create_subscription(type_class, topic, qos_profile=qos,
-                    callback=lambda msg, topic=topic : self.message_from_ros_callback(topic, msg)
+                self.config[topic_name]["sub"] = self.create_subscription(type_class, topic_name, qos_profile=qos,
+                    callback=lambda msg, topic=topic_name : self.message_from_ros_callback(topic, msg)
                 )
-                self.config[topic]["sub_cnt"] = 1
-                self.get_logger().info(f"Subscriber for topic {topic} successfully register")
+                self.config[topic_name]["sub_cnt"] = 1
+                self.get_logger().info(f"Subscriber for topic {topic_name} successfully register")
 
+            # all of these can be thrown by the get_message function
+            except ValueError:
+                self.get_logger().info(f"The 'full_type_string' parameter is not in correct format, expected: 'package/Type', got: '{full_type_string}'")
             except ModuleNotFoundError:
-                self.get_logger().info(f"Module {package_name}.{msg} does not exist")
+                self.get_logger().info(f"Package {package_name} does not exist")
             except AttributeError:
                 self.get_logger().info(f"Package {package_name} does not contain {type_name} type")
 
         # already registered, just increment counter
         else:
-            self.get_logger().info(f"There is already registered subscriber on topic {topic}")
-            self.config[topic]["sub_cnt"] += 1
+            self.get_logger().info(f"There is already registered subscriber on topic {topic_name}")
+            self.config[topic_name]["sub_cnt"] += 1
 
 
-    def unsubscribe(self, topic):
+    def unsubscribe(self, topic: str) -> None:
         """
         Reverse function to subscribe. Note that the actual unregistering of subscriber happens only
         after this function is called the same amount of times as subscribe().
@@ -314,22 +319,22 @@ class NodeRedInterface(Node):
         # not yet registered
         if self.config.get(service_name).get("cli_cnt") is None:
             try:
-
                 # import type
                 package_name, type_name = full_type_string.split("/")
-                service_type = get_service(f"{package_name}/{service_name}")
-                
+                type_class = get_service(f"{package_name}/{type_name}")      
+
                 # create subscriber and config
-                self.config[service_name]["cli"] = self.create_client(service_type, service_name)
+                self.config[service_name]["cli"] = self.create_client(type_class, service_name)
                 self.config[service_name]["cli_cnt"] = 1
-                self.config[service_name]["cli_type"] = service_type
+                self.config[service_name]["cli_type"] = type_class
                 
                 self.get_logger().info(f"Client for service {service_name} successfully register")
 
+            # all of these can be thrown by the get_message function
             except ValueError:
-                self.get_logger().info(f"Passed 'type' is not in correct format {type}, expected: package/Type")
+                self.get_logger().info(f"The 'full_type_string' parameter is not in correct format, expected: 'package/Type', got: '{full_type_string}'")
             except ModuleNotFoundError:
-                self.get_logger().info(f"Module {package_name} does not exist")
+                self.get_logger().info(f"Package {package_name} does not exist")
             except AttributeError:
                 self.get_logger().info(f"Package {package_name} does not contain {type_name} type")
 
