@@ -34,33 +34,18 @@ class State extends events.EventEmitter
         {
             this.current_state = state;
             
-            super.emit("", this.current_state);
+            super.emit("change", this.current_state);
             super.emit(this.current_state);
         }
     }
 
-    /**
-     * Triggers on any state change.
-     * @param {Function} listener 
-     */
-    on(listener) 
+    on(state, listener)
     {
-        return super.on("", listener);
-    }
+        if (listener) {
+            listener(this.current_state);
+        }
 
-    off(listener) 
-    {
-        return super.off("", listener);
-    }
-
-    /**
-     * Triggers when system enters specific state
-     * @param {string} state 
-     * @param {Function} listener 
-     */
-    once_state(state, listener)
-    {
-        return super.once(state, listener);
+        super.on(state, listener)
     }
 }
 
