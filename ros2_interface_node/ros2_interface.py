@@ -1,6 +1,9 @@
 """
 Filename: ros2_interface.py
-Description: This file contains ROS2 node implementing bridge between websocket and ROS2
+Description: 
+    This file implements a ROS2 node. This node handles dynamic creation and destruction of ROS2 communication objects
+    as well as bidirectional propagation of messages between ROS2 and WebSocket.
+    Configuration commands are received from the WebSocket side.
 Author: Daniel Onderka (xonder05)
 Date: 01/2026
 """
@@ -9,7 +12,6 @@ import json
 
 import rclpy
 from rclpy.node import Node
-
 from rosidl_runtime_py import message_to_ordereddict, set_message_fields
 from rosidl_runtime_py.utilities import get_message, get_service
 
@@ -33,78 +35,106 @@ class NodeRedInterface(Node):
         self.ws_client.set_message_callback(self.message_from_ws_callback)
         self.ws_client.connect()
 
-        # all registered publishers, subscribers, service clients and servers
+        # holds data about all registered publishers, subscribers, service clients and servers
         self.config = {}
 
         self.get_logger().info("InitDone")
 
 # -------------------- Message handlers --------------------
 
-    def message_from_ws_callback(self, msg_string):
+    def message_from_ws_callback(self, msg_string: str) -> None:
+        """
+        Handles messages received from websocket. Assumes received message object is serialized json.
+        Based on 'op' field calls appropriate function. Sends response back to the caller.
+        """
 
         # parse serialized json, format definition can be found in todo
         msg = json.loads(msg_string)
         
         # switch depending on operation
         if msg.get("op") == "publish":
-            self.publish(msg.get("topic"), msg.get("msg"))
+            self.publish(msg.get("topic"), msg.get("payload"))
 
         if msg.get("op") == "call":
             self.call(msg.get("service"), msg.get("id"), msg.get("payload"))
 
         elif msg.get("op") == "advertise":
-            self.advertise(msg.get("topic"), msg.get("type"))
+            result = self.advertise(msg.get("topic"), msg.get("type"))
+
+            response = {"op": "advertise", "id": msg.get("id"), "payload": result}
+            response_serial = json.dumps(response)
+            self.ws_client.send(response_serial)
         
         elif msg.get("op") == "unadvertise":
-            self.unadvertise(msg.get("topic"))
+            result = self.unadvertise(msg.get("topic"))
+
+            response = {"op": "unadvertise", "id": msg.get("id"), "payload": result}
+            response_serial = json.dumps(response)
+            self.ws_client.send(response_serial)
 
         elif msg.get("op") == "subscribe":
-            self.subscribe(msg.get("topic"), msg.get("type"))
+            result = self.subscribe(msg.get("topic"), msg.get("type"))
+
+            response = {"op": "subscribe", "id": msg.get("id"), "payload": result}
+            response_serial = json.dumps(response)
+            self.ws_client.send(response_serial)
 
         elif msg.get("op") == "unsubscribe":
-            self.unsubscribe(msg.get("topic"))
+            result = self.unsubscribe(msg.get("topic"))
+
+            response = {"op": "unsubscribe", "id": msg.get("id"), "payload": result}
+            response_serial = json.dumps(response)
+            self.ws_client.send(response_serial)
         
         elif msg.get("op") == "consume":
-            self.consume(msg.get("service"), msg.get("type"))
+            result = self.consume(msg.get("service"), msg.get("type"))
+
+            response = {"op": "consume", "id": msg.get("id"), "payload": result}
+            response_serial = json.dumps(response)
+            self.ws_client.send(response_serial)
 
         elif msg.get("op") == "unconsume":
-            self.unconsume(msg.get("service"))
+            result = self.unconsume(msg.get("service"))
+
+            response = {"op": "unconsume", "id": msg.get("id"), "payload": result}
+            response_serial = json.dumps(response)
+            self.ws_client.send(response_serial)
 
         else:
             self.get_logger().info("WS received message with unknown operation, it will be ignored")
 
 
-    def message_from_ros_callback(self, topic, ros_msg):
+    def message_from_ros_callback(self, topic: str, ros_msg) -> None:
+        """
+        This is a universal function for forwarding messages from ROS2 subscriber to WebSocket. 
+        Uses message_to_ordereddict from rosidl_runtime_py to convert any ROS message to Python dictionary.
+        Proper WS protocol header is than constructed and prepended to the dict. The resulting dict is than 
+        serialized and sent out.
+        """
+        ws_msg = {
+            "op": "publish", 
+            "topic": topic, 
+        }
+        ws_msg["payload"] = message_to_ordereddict(ros_msg)
 
-        # type independent conversion from ros2 message type to python dict
-        msg = message_to_ordereddict(ros_msg)
-
-        # wrap received data from ros2 into ws message
-        ws_msg = {"op": "publish", "topic": topic, "msg": msg}
-
-        # serialize
         json_msg = json.dumps(ws_msg)
-
-        # send to node-red
         self.ws_client.send(json_msg)
 
 
     def publish(self, topic: str, message: dict) -> None:
-
+        """
+        Publishes message to ROS2. Before using this function advertise() for same 'topic' must be called.
+        Uses set_message_fields from rosidl_runtime_py to convert Python dictionary to ROS message.
+        The message types are imported dynamically during advertise(). Therefore the message is constructed
+        using type object retrieved from self.config.
+        """
         # check publisher existence
         if self.config.get(topic) is None or self.config.get(topic).get("pub") is None:
             self.get_logger().info(f"Topic {topic} does not have registered publisher")
 
         else:
-            # msg = String()
-            # but the std_msgs/String include is saved in dictionary
-            # this way it can be any installed type
             msg = self.config.get(topic).get("pub_type")()
-
-            # fill the message object with values from dict            
             set_message_fields(msg, message)
-            
-            # call publish()
             self.config.get(topic).get("pub").publish(msg)
 
 
@@ -143,7 +173,12 @@ class NodeRedInterface(Node):
             msg = message_to_ordereddict(res)
 
             # wrap received data from ros2 into ws message
-            ws_msg = {"op": "call", "service": service_name, "id": connection_id, "payload": msg}
+            ws_msg = {
+                "op": "call", 
+                "service": service_name, 
+                "id": connection_id, 
+                "payload": msg
+            }
 
             # serialize
             json_msg = json.dumps(ws_msg)
@@ -194,15 +229,22 @@ class NodeRedInterface(Node):
             # all of these can be thrown by the get_message function
             except ValueError:
                 self.get_logger().info(f"The 'full_type_string' parameter is not in correct format, expected: 'package/Type', got: '{full_type_string}'")
+                return False
+            
             except ModuleNotFoundError:
                 self.get_logger().info(f"Package {package_name} does not exist")
+                return False
+            
             except AttributeError:
                 self.get_logger().info(f"Package {package_name} does not contain {type_name} type")
+                return False
 
         # already registered, just increment counter
         else:
             self.get_logger().info(f"There is already registered publisher on topic {topic}")
             self.config[topic]["pub_cnt"] += 1
+
+        return True
 
 
     def unadvertise(self, topic: str) -> None:
@@ -233,6 +275,8 @@ class NodeRedInterface(Node):
                     del self.config[topic]
                 
                 self.get_logger().info(f"Successfully removed publisher from topic {topic}")
+        
+        return True
 
 
     def subscribe(self, topic_name: str, full_type_string: str, qos = 10) -> None:
@@ -264,15 +308,22 @@ class NodeRedInterface(Node):
             # all of these can be thrown by the get_message function
             except ValueError:
                 self.get_logger().info(f"The 'full_type_string' parameter is not in correct format, expected: 'package/Type', got: '{full_type_string}'")
+                return False
+            
             except ModuleNotFoundError:
                 self.get_logger().info(f"Package {package_name} does not exist")
+                return False
+            
             except AttributeError:
                 self.get_logger().info(f"Package {package_name} does not contain {type_name} type")
-
+                return False
+            
         # already registered, just increment counter
         else:
             self.get_logger().info(f"There is already registered subscriber on topic {topic_name}")
             self.config[topic_name]["sub_cnt"] += 1
+
+        return True
 
 
     def unsubscribe(self, topic: str) -> None:
@@ -302,6 +353,8 @@ class NodeRedInterface(Node):
                     del self.config[topic]
 
                 self.get_logger().info(f"Successfully removed subscriber from topic {topic}")
+
+        return True
 
 
     def consume(self, service_name: str, full_type_string: str, qos = 10) -> None:
@@ -333,15 +386,22 @@ class NodeRedInterface(Node):
             # all of these can be thrown by the get_message function
             except ValueError:
                 self.get_logger().info(f"The 'full_type_string' parameter is not in correct format, expected: 'package/Type', got: '{full_type_string}'")
+                return False
+            
             except ModuleNotFoundError:
                 self.get_logger().info(f"Package {package_name} does not exist")
+                return False
+            
             except AttributeError:
                 self.get_logger().info(f"Package {package_name} does not contain {type_name} type")
+                return False
 
         # already registered, just increment counter
         else:
             self.get_logger().info(f"There is already registered client on service {service_name}")
             self.config[service_name]["cli_cnt"] += 1
+
+        return True
 
 
     def unconsume(self, service_name: str) -> None:
@@ -372,6 +432,8 @@ class NodeRedInterface(Node):
                     del self.config[service_name]
 
                 self.get_logger().info(f"Successfully removed client from service {service_name}")
+
+        return True
 
 # -------------------- Main --------------------
 

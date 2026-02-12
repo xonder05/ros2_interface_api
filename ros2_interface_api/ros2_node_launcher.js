@@ -14,125 +14,163 @@
 
 "use strict";
 
+// -------------------- Imports --------------------
+
+const Logger = require("./logger.js");
+const State = require("./state.js");
+
 const path = require("path");
 const child_process = require("child_process");
-const logger = require("./logger.js");
 
-let print_prefix = "[Launcher]";
+// -------------------- Init and Properties --------------------
+
+const logger = new Logger();
+logger.prefix = "[JavaScript Subprocess Handler]";
+const state = new State();
+state.set("stopped");
 
 let child_handle = undefined;
 let sigterm_timeout = undefined;
 let sigkill_timeout = undefined;
 
-const STATE = Object.freeze({
-  OFFLINE: 0,
-  ONLINE: 1,
-});
+// -------------------- Subprocess Public API --------------------
 
-let CURRENT_STATE = STATE.OFFLINE;
-
-/**
- * Spawns new instance of the ros2
- */
 function launch(port)
 {
-    if (CURRENT_STATE == STATE.ONLINE) {
-        logger.warn(print_prefix, "Could not start ROS2 interface node because it is already running");
-    }
-
-    child_handle = child_process.spawn(
-        "python3", 
-        [
-            path.join(__dirname, "..", "ros2_interface_node", "ros2_interface.py"),
-            "--ros-args", "-p", `port:=${port}`
-        ],
-        { stdio: "inherit" }
-    );
-
-    for (const [event, handler] of Object.entries(instance_events)) 
+    if (state.get() == "stopped") 
     {
-        child_handle.once(event, handler);
-    }
+        child_handle = child_process.spawn(
+            "python3", 
+            [
+                path.join(__dirname, "..", "ros2_interface_node", "ros2_interface.py"),
+                "--ros-args", "-p", `port:=${port}`
+            ],
+            { stdio: "inherit" }
+        );
 
-    logger.info(print_prefix, "ROS2 interface successfully launched");
-    CURRENT_STATE = STATE.ONLINE;
+        for (const [event, handler] of Object.entries(instance_events)) 
+        {
+            child_handle.once(event, handler);
+        }
+
+        logger.info("Created ROS2 interface node");
+        state.set("running");
+    }
+    else if (state.get() == "running")
+    {
+        logger.warn("ROS2 interface node is already running, this call will be ignored");
+    }
+    else
+    {
+        logger.error("Unexpected call to launch, launcher in inconsistent state, transitioning to error");
+        state.set("error");
+    }
 }
 
-/**
- * child_handle.on() callback functions
- */
+function stop()
+{
+    if (state.get() == "running")
+    {
+        logger.info("Interrupting ROS2 interface node [SIGINT]");
+        child_handle.kill("SIGINT");
+
+        sigterm_timeout = setTimeout(() => 
+        {
+            logger.info("Terminating ROS2 interface node [SIGTERM]");
+            child_handle.kill("SIGTERM");
+            
+        }, 500);
+
+        sigkill_timeout = setTimeout(() => 
+        {
+            logger.info("Killing ROS2 interface node [SIGKILL]");
+            child_handle.kill("SIGKILL");
+
+        }, 1000);
+
+        state.set("stopping");
+    }
+    else if (state.get() == "stopped")
+    {
+        logger.warn("ROS2 interface node is already stopped, this call will be ignored");
+    }
+    else
+    {
+        logger.error("Unexpected call to stop, launcher in inconsistent state, transitioning to error");
+        state.set("error");
+    }
+}
+
+// -------------------- Subprocess Events --------------------
+
 const instance_events = {
 
-    error: (err) => {
-        logger.error(print_prefix, `There was an error when launching ROS2 interface node: ${err.code}`);
-        CURRENT_STATE = STATE.OFFLINE;
+    error: (err) => 
+    {
+        logger.error(`The following error occurred when trying to launch ROS2 interface node: ${err.code}`);
+        logger.error("Transitioning to error state");
+        state.set("error");
     },
 
     exit: (code, signal) => 
     {
-        if (signal) {
-            logger.warn(print_prefix, `ROS2 interface node killed by ${signal} signal`);
+        if (state.get() == "stopping")
+        {
+            if (code) {
+                logger.error(`ROS2 interface node exited (return code: ${code})`);
+                logger.error(`At this point the node should have been killed by signal, transitioning to error`);
+                state.set("error");
+            }
+
+            if (signal) {
+                logger.info(`ROS2 interface node successfully killed by ${signal} signal`);
+                state.set("stopped");
+            }
+
+            // cleanup
+            if (sigterm_timeout != undefined) {
+                clearTimeout(sigterm_timeout)
+                sigterm_timeout = undefined;
+            }
+
+            if (sigkill_timeout != undefined) {
+                clearTimeout(sigkill_timeout)
+                sigkill_timeout = undefined;
+            }
         }
+        else if (state.get() == "running")
+        {
+            if (code) {
+                logger.warn(`ROS2 interface node exited (return code: ${code})`);
+                state.set("error");
+            }
 
-        if (code) {
-            logger.warn(print_prefix, `ROS2 interface node exited (return code: ${code})`);
+            if (signal) {
+                logger.warn(`ROS2 interface node killed by ${signal} signal`);
+                state.set("error");
+            }
         }
-
-        CURRENT_STATE = STATE.OFFLINE;
-
-        if (sigterm_timeout != undefined) {
-            sigterm_timeout.cancel()
-        }
-
-        if (sigkill_timeout != undefined) {
-            sigkill_timeout.cancel()
+        else
+        {
+            logger.error("Unexpected call to exit, launcher in inconsistent state, transitioning to error");
+            state.set("error");
         }
     }
 }
 
-/**
- * Sends increasingly strong exit signals to ros2_interface.
- */
-function stop()
-{
-    if (CURRENT_STATE == STATE.OFFLINE) {
-        logger.warn(print_prefix, "Cannot stop ROS2 interface node because it is not running");
-    }
-
-    logger.info(print_prefix, "Interrupting ros2_interface [SIGINT]");
-    child_handle.kill("SIGINT")
-
-    setTimeout(() => {
-        logger.info(print_prefix, "Terminating ros2_interface [SIGTERM]");
-        child_handle.kill("SIGTERM")
-        
-    }, 500);
-
-    setTimeout(() => {
-        logger.info(print_prefix, "Killing ros2_interface [SIGKILL]");
-        child_handle.kill("SIGKILL")
-    }, 1000);
-}
-
-/**
- * Kills ros2_interface on application exit (prevents zombie instances)
- */
 process.on("exit", (code) => 
 {
-    if (CURRENT_STATE == STATE.ONLINE)
+    if (state.get() == "running")
     {
-        logger.info(print_prefix, `Application shut down, stopping ROS2 interface`)
+        logger.info("Application shut down, stopping ROS2 interface")
         stop();
     }
 });
 
-module.exports = {
-    
-    launch: launch,
-    stop: stop,
+// -------------------- Exports --------------------
 
-    STATE: STATE,
-    get_current_state: () => {
-        return CURRENT_STATE;
-    }
+module.exports = {
+    state,
+    launch,
+    stop,
 }
