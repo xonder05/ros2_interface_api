@@ -32,7 +32,7 @@ let pending_requests = {};
 const state = new State();
 state.set("inactive");
 
-launcher.state.on((launcher_state) => 
+launcher.state.on("change", (launcher_state) => 
 {
     if (launcher_state == "running" && ws.state.get() == "connected") {
         state.set("active");
@@ -42,7 +42,7 @@ launcher.state.on((launcher_state) =>
     }
 })
 
-ws.state.on((ws_state) => 
+ws.state.on("change", (ws_state) => 
 {
     if (ws_state == "connected" && launcher.state.get() == "running") {
         state.set("active");
@@ -114,7 +114,7 @@ async function advertise_topic(request_id, topic_name, full_type_name, qos)
         }
     }
 
-    throw new Error("Could not send message");
+    throw new Error("Interface is not active");
 }
 
 /**
@@ -140,7 +140,7 @@ function unadvertise_topic(request_id, topic_name)
         }
     }
 
-    throw new Error("Could not send message");
+    throw new Error("Interface is not active");
 }
 
 /**
@@ -181,7 +181,7 @@ function subscribe_topic(request_id, topic_name, full_type_name, message_callbac
         }
     }
 
-    throw new Error("Could not send message");
+    throw new Error("Interface is not active");
 }
 
 /**
@@ -209,8 +209,7 @@ function unsubscribe_topic(request_id, topic_name, message_callback)
         }
     }
 
-    throw new Error("Could not send message");
-
+    throw new Error("Interface is not active");
 }
 
 function consume_service(request_id, service_name, full_type_name, qos) 
@@ -246,7 +245,7 @@ function consume_service(request_id, service_name, full_type_name, qos)
         }
     }
 
-    throw new Error("Could not send message");
+    throw new Error("Interface is not active");
 }
 
 function unconsume_service(request_id, service_name) 
@@ -268,7 +267,7 @@ function unconsume_service(request_id, service_name)
         }
     }
 
-    throw new Error("Could not send message");
+    throw new Error("Interface is not active");
 }
 
 /**
@@ -291,7 +290,7 @@ function publish(topic_name, payload)
         }
     }
 
-    throw new Error("Could not send message");
+    throw new Error("Interface is not active");
 }
 
 async function call(request_id, service_name, payload)
@@ -314,20 +313,32 @@ async function call(request_id, service_name, payload)
         }
     }
 
-    throw new Error("Could not send message");
+    throw new Error("Interface is not active");
 }
 
 // -------------------- Incoming Message Handling --------------------
 
 function message_callback(msg)
 {
-    if (msg.op == "advertise" ||
-        msg.op == "consume")
+    if (msg.op == "advertise")
     {
-        const { promise, obj } = pending_requests[msg.id];
+        const { promise, pub } = pending_requests[msg.id];
 
         if (msg.payload) {
-            promise.resolve(obj)
+            promise.resolve(pub)
+        }
+        else {
+            promise.reject()
+        }
+
+        delete pending_requests[msg.request_id]
+    }
+    else if (msg.op == "consume")
+    {
+        const { promise, cli } = pending_requests[msg.id];
+
+        if (msg.payload) {
+            promise.resolve(cli)
         }
         else {
             promise.reject()
