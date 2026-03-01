@@ -1,0 +1,14 @@
+{
+    "name": "ros2_interface_api",
+    "version": "1.0.0",
+    "description": "",
+    "main": "ros2_interface_api/ros2_interface_api.js",
+    "dependencies": {
+        "colors": "^1.4.0",
+        "websocket": "^1.0.35"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/xonder05/is-web-api"
+    }
+}
