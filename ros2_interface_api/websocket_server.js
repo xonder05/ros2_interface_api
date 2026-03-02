@@ -187,6 +187,7 @@ const connection_events = {
     {
         logger.warn(`Connection Closed [${code}]:`, reason);
         state.set("waiting");
+        connection = undefined;
 
         if (closing) {
             stop();

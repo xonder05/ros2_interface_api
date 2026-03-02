@@ -159,7 +159,7 @@ class NodeRedInterface(Node):
             future = self.config.get(service_name).get("cli").call_async(req)
 
             # complete and timeout callback
-            timer = self.create_timer(1.0, lambda: self.response(service_name, connection_id, future, timer))
+            timer = self.create_timer(2.0, lambda: self.response(service_name, connection_id, future, timer))
             future.add_done_callback(lambda future: self.response(service_name, connection_id, future, timer))
 
 
