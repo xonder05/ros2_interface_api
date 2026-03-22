@@ -63,7 +63,7 @@ function launch(port)
     else
     {
         logger.error("Unexpected call to launch, launcher in inconsistent state, transitioning to error");
-        state.set("error");
+        state.set("err");
     }
 }
 
@@ -97,7 +97,7 @@ function stop()
     else
     {
         logger.error("Unexpected call to stop, launcher in inconsistent state, transitioning to error");
-        state.set("error");
+        state.set("err");
     }
 }
 
@@ -109,7 +109,7 @@ const instance_events = {
     {
         logger.error(`The following error occurred when trying to launch ROS2 interface node: ${err.code}`);
         logger.error("Transitioning to error state");
-        state.set("error");
+        state.set("err");
     },
 
     exit: (code, signal) => 
@@ -119,7 +119,7 @@ const instance_events = {
             if (code) {
                 logger.error(`ROS2 interface node exited (return code: ${code})`);
                 logger.error(`At this point the node should have been killed by signal, transitioning to error`);
-                state.set("error");
+                state.set("err");
             }
 
             if (signal) {
@@ -142,18 +142,18 @@ const instance_events = {
         {
             if (code) {
                 logger.warn(`ROS2 interface node exited (return code: ${code})`);
-                state.set("error");
+                state.set("err");
             }
 
             if (signal) {
                 logger.warn(`ROS2 interface node killed by ${signal} signal`);
-                state.set("error");
+                state.set("err");
             }
         }
         else
         {
             logger.error("Unexpected call to exit, launcher in inconsistent state, transitioning to error");
-            state.set("error");
+            state.set("err");
         }
     }
 }

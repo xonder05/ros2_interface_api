@@ -167,7 +167,7 @@ function subscribe_topic(request_id, topic_name, full_type_name, message_callbac
                 topic_name,
                 full_type_name,
                 message_callback,
-                destroy: async function (request_id) {
+                delete: async function (request_id) {
                     await unsubscribe_topic(request_id, this.topic_name, this.message_callback)
                 }
             })

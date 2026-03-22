@@ -54,7 +54,7 @@ function start(port)
     else
     {
         logger.warn("Server is already running");
-        state.set("error");
+        state.set("err");
     }
 }
 
@@ -78,7 +78,7 @@ function stop()
     else
     {
         logger.error("Websocket stopping error");
-        state.set("error");
+        state.set("err");
     }
 }
 
@@ -110,7 +110,7 @@ const http_events = {
     error: (err) => 
     {
         logger.error(`HTTP server failed with error: ${err}"`);
-        state.set("error");
+        state.set("err");
     },
 
     request: (req, res) => 
@@ -180,7 +180,7 @@ const connection_events = {
     error: (error) =>
     {
         logger.error(`Connection Error: ${error.toString()}`);
-        state.set("error");
+        state.set("err");
     },
 
     close: (code, reason) =>
