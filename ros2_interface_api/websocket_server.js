@@ -45,6 +45,7 @@ function start(port)
         ws_server = new WebSocketServer({
             httpServer: http_server,
             closeTimeout: 1000,
+            maxReceivedFrameSize: 1000000,
             tlsOptions: {
                     rejectUnauthorized: false
             }

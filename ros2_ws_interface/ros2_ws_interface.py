@@ -8,7 +8,7 @@ Author: Daniel Onderka (xonder05)
 Date: 01/2026
 """
 
-import json
+import json, queue
 
 import rclpy
 from rclpy.node import Node
@@ -19,7 +19,7 @@ import websocket_client
 
 class NodeRedInterface(Node):
     def __init__(self):
-        super().__init__("node_red_interface")
+        super().__init__("ws_interface")
 
         self.declare_parameters(
             namespace="",
@@ -29,79 +29,83 @@ class NodeRedInterface(Node):
         )
         self.port = self.get_parameter("port").get_parameter_value().integer_value
 
+        # holds data about all registered publishers, subscribers, service clients and servers
+        self.config = {}
+        self.ws_message_queue = queue.Queue()
+
         self.ws_client = websocket_client.WebsocketClient()
         self.ws_client.start()
         self.ws_client.set_port(self.port)
-        self.ws_client.set_message_callback(self.message_from_ws_callback)
+        self.ws_client.set_message_queue(self.ws_message_queue)
         self.ws_client.connect()
-
-        # holds data about all registered publishers, subscribers, service clients and servers
-        self.config = {}
 
         self.get_logger().info("InitDone")
 
 # -------------------- Message handlers --------------------
 
-    def message_from_ws_callback(self, msg_string: str) -> None:
+    def handle_messages_from_ws(self) -> None:
         """
         Handles messages received from websocket. Assumes received message object is serialized json.
         Based on 'op' field calls appropriate function. Sends response back to the caller.
         """
 
-        # parse serialized json, format definition can be found in todo
-        msg = json.loads(msg_string)
-        
-        # switch depending on operation
-        if msg.get("op") == "publish":
-            self.publish(msg.get("topic"), msg.get("payload"))
+        while not self.ws_message_queue.empty():
+            msg_string = self.ws_message_queue.get()
 
-        if msg.get("op") == "call":
-            self.call(msg.get("service"), msg.get("id"), msg.get("payload"))
+            # parse serialized json, format definition can be found in todo
+            msg = json.loads(msg_string)
+            
+            # switch depending on operation
+            if msg.get("op") == "publish":
+                self.publish(msg.get("topic"), msg.get("payload"))
 
-        elif msg.get("op") == "advertise":
-            result = self.advertise(msg.get("topic"), msg.get("type"))
+            if msg.get("op") == "call":
+                self.call(msg.get("service"), msg.get("id"), msg.get("payload"))
 
-            response = {"op": "advertise", "id": msg.get("id"), "payload": result}
-            response_serial = json.dumps(response)
-            self.ws_client.send(response_serial)
-        
-        elif msg.get("op") == "unadvertise":
-            result = self.unadvertise(msg.get("topic"))
+            elif msg.get("op") == "advertise":
+                result = self.advertise(msg.get("topic"), msg.get("type"))
 
-            response = {"op": "unadvertise", "id": msg.get("id"), "payload": result}
-            response_serial = json.dumps(response)
-            self.ws_client.send(response_serial)
+                response = {"op": "advertise", "id": msg.get("id"), "payload": result}
+                response_serial = json.dumps(response)
+                self.ws_client.send(response_serial)
+            
+            elif msg.get("op") == "unadvertise":
+                result = self.unadvertise(msg.get("topic"))
 
-        elif msg.get("op") == "subscribe":
-            result = self.subscribe(msg.get("topic"), msg.get("type"))
+                response = {"op": "unadvertise", "id": msg.get("id"), "payload": result}
+                response_serial = json.dumps(response)
+                self.ws_client.send(response_serial)
 
-            response = {"op": "subscribe", "id": msg.get("id"), "payload": result}
-            response_serial = json.dumps(response)
-            self.ws_client.send(response_serial)
+            elif msg.get("op") == "subscribe":
+                result = self.subscribe(msg.get("topic"), msg.get("type"))
 
-        elif msg.get("op") == "unsubscribe":
-            result = self.unsubscribe(msg.get("topic"))
+                response = {"op": "subscribe", "id": msg.get("id"), "payload": result}
+                response_serial = json.dumps(response)
+                self.ws_client.send(response_serial)
 
-            response = {"op": "unsubscribe", "id": msg.get("id"), "payload": result}
-            response_serial = json.dumps(response)
-            self.ws_client.send(response_serial)
-        
-        elif msg.get("op") == "consume":
-            result = self.consume(msg.get("service"), msg.get("type"))
+            elif msg.get("op") == "unsubscribe":
+                result = self.unsubscribe(msg.get("topic"))
 
-            response = {"op": "consume", "id": msg.get("id"), "payload": result}
-            response_serial = json.dumps(response)
-            self.ws_client.send(response_serial)
+                response = {"op": "unsubscribe", "id": msg.get("id"), "payload": result}
+                response_serial = json.dumps(response)
+                self.ws_client.send(response_serial)
+            
+            elif msg.get("op") == "consume":
+                result = self.consume(msg.get("service"), msg.get("type"))
 
-        elif msg.get("op") == "unconsume":
-            result = self.unconsume(msg.get("service"))
+                response = {"op": "consume", "id": msg.get("id"), "payload": result}
+                response_serial = json.dumps(response)
+                self.ws_client.send(response_serial)
 
-            response = {"op": "unconsume", "id": msg.get("id"), "payload": result}
-            response_serial = json.dumps(response)
-            self.ws_client.send(response_serial)
+            elif msg.get("op") == "unconsume":
+                result = self.unconsume(msg.get("service"))
 
-        else:
-            self.get_logger().info("WS received message with unknown operation, it will be ignored")
+                response = {"op": "unconsume", "id": msg.get("id"), "payload": result}
+                response_serial = json.dumps(response)
+                self.ws_client.send(response_serial)
+
+            else:
+                self.get_logger().info("WS received message with unknown operation, it will be ignored")
 
 
     def message_from_ros_callback(self, topic: str, ros_msg) -> None:
@@ -134,8 +138,15 @@ class NodeRedInterface(Node):
 
         else:
             msg = self.config.get(topic).get("pub_type")()
-            set_message_fields(msg, message)
-            self.config.get(topic).get("pub").publish(msg)
+
+            try:
+                set_message_fields(msg, message)
+                self.config.get(topic).get("pub").publish(msg)
+            
+            except AttributeError:
+                self.get_logger().info("Cannot publish message, because the fields do not match")
+            except TypeError:
+                self.get_logger().info("Cannot publish message, because field types do not match")
 
 
     def call(self, service_name: str, connection_id: str, message: dict) -> None:
@@ -440,7 +451,11 @@ class NodeRedInterface(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = NodeRedInterface()
-    rclpy.spin(node)
+
+    while rclpy.ok():
+        rclpy.spin_once(node, timeout_sec=0.1)
+        node.handle_messages_from_ws()
+
     node.destroy_node()
     rclpy.shutdown()
 

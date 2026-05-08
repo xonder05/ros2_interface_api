@@ -16,7 +16,7 @@ class WebsocketClient():
 
         self.connection = None
         self.listener_task = None
-        self.message_callback = lambda msg: print(msg)
+        self.received_message_queue = None
 
         self.event_loop = None
         self.asyncio_thread = None
@@ -103,7 +103,7 @@ class WebsocketClient():
         """
         if self.connection is not None:
             async for msg in self.connection:
-                self.message_callback(msg)
+                self.received_message_queue.put(msg)
 
 
     async def _disconnect(self):
@@ -170,11 +170,11 @@ class WebsocketClient():
             self.server_port = port
 
 
-    def set_message_callback(self, callback) -> bool:
+    def set_message_queue(self, queue) -> bool:
         """
         By default received messages are printed into console.
         This setter is disabled when connection is established.
         """
 
         if self.connection is None:
-            self.message_callback = callback
+            self.received_message_queue = queue

@@ -42,7 +42,7 @@ function launch(port)
         child_handle = child_process.spawn(
             "python3", 
             [
-                path.join(__dirname, "..", "ros2_interface_node", "ros2_interface.py"),
+                path.join(__dirname, "..", "ros2_ws_interface", "ros2_ws_interface.py"),
                 "--ros-args", "-p", `port:=${port}`
             ],
             { stdio: "inherit" }
