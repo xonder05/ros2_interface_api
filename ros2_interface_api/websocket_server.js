@@ -1,8 +1,9 @@
-#!/usr/bin/env node
-
 /**
  * @file websocket_server.js
- * @brief 
+ * 
+ * Starts HTTP server, promotes to WebSocket, accepts single connection. 
+ * State is propagated higher using State object. 
+ * Mostly just wrapper around websocket module.
  * 
  * @author Daniel Onderka (xonder05)
  * @date 01/2026

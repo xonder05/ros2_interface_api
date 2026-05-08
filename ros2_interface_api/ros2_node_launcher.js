@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * @file ros2_node_launcher.js
  * @brief Handles starting and stopping the ros2_interface. 

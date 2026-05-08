@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Filename: websocket_client.py
 Description: This file implements class for asynchronous websocket client connection.

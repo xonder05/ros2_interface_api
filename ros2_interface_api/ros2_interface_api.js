@@ -1,6 +1,6 @@
 /**
  * @file ros2_interface_api.js
- * @brief 
+ * @brief Handles message creation, request-response matching, response handling, controls submodules, holds state, provides public API.
  * 
  * @author Daniel Onderka (xonder05)
  * @date 01/2026
@@ -19,7 +19,7 @@ const events = require('events');
 // -------------------- Init and Properties --------------------
 
 const logger = new Logger();
-logger.prefix = "[JS Subprocess]";
+logger.prefix = "[ROS2 Interface API]";
 
 ws.set_message_callback(message_callback);
 
