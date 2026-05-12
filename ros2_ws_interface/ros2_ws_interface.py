@@ -158,7 +158,8 @@ class NodeRedInterface(Node):
 
         else:
             # check if there is server that can accept the call
-            if not self.config.get(service_name).get("cli").wait_for_service():
+            if not self.config.get(service_name).get("cli").wait_for_service(timeout_sec=1.0):
+                self.get_logger().info(f"There is no available server for service {service_name}")
                 return
             
             # message type from dict, no need for include
